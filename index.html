@@ -66,7 +66,7 @@
                 <div style="font-size: 1.2rem; margin-bottom: 5px;">☁️</div>
                 <p style="font-size: 0.75rem; font-weight: 600; color: var(--primary);">点击或拖拽上传</p>
                 <input type="file" id="fileInput" accept=".pdf,image/*" multiple style="display:none">
-                <input type="file" id="replaceInput" style="display:none">
+                <input type="file" id="replaceInput" accept=".pdf,image/*" style="display:none">
             </div>
             <div id="fileList"></div>
         </div>
@@ -128,6 +128,36 @@
 
         el('fileInput').onchange = e => handleFiles(e.target.files);
 
+        // --- 替换功能核心逻辑 ---
+        function triggerReplace(id, event) {
+            event.stopPropagation(); // 阻止触发预览
+            currentReplaceTargetId = id;
+            el('replaceInput').click();
+        }
+
+        el('replaceInput').onchange = async (e) => {
+            const file = e.target.files[0];
+            if (!file || !currentReplaceTargetId) return;
+
+            const idx = files.findIndex(f => f.id === currentReplaceTargetId);
+            if (idx === -1) return;
+
+            const type = file.type.includes('pdf') ? 'pdf' : 'image';
+            // 替换数组中的文件，保留原 ID 保持顺序
+            files[idx] = { id: currentReplaceTargetId, file: file, name: file.name, type: type };
+
+            // 局部刷新 DOM 内容
+            const itemDom = el('fileList').querySelector(`[data-id="${currentReplaceTargetId}"]`);
+            const icon = type === 'image' ? '🖼️' : '📄';
+            itemDom.querySelector('.file-info b').innerText = file.name;
+            itemDom.querySelector('span').innerText = icon;
+
+            showPreview(currentReplaceTargetId);
+            e.target.value = ''; // 重置 input
+            el('status').innerText = `已替换为: ${file.name}`;
+        };
+        // -----------------------
+
         async function handleFiles(uploadedFiles) {
             for (const f of Array.from(uploadedFiles)) {
                 const id = 'f_' + Math.random().toString(36).substr(2, 9);
@@ -147,9 +177,12 @@
             item.innerHTML = `
                 <span>${icon}</span>
                 <div class="file-info"><b>${fObj.name}</b></div>
+                <div style="color:#3498db; cursor:pointer; margin-right:10px; font-size:1rem;" title="替换此文件" onclick="triggerReplace('${fObj.id}', event)">🔄</div>
                 <div style="color:#ff7675; cursor:pointer;" onclick="removeFile('${fObj.id}')">✕</div>
             `;
-            item.onclick = (e) => { if(e.target.innerText !== '✕') showPreview(fObj.id); };
+            item.onclick = (e) => { 
+                if(e.target.innerText !== '✕' && e.target.innerText !== '🔄') showPreview(fObj.id); 
+            };
             item.ondblclick = () => { if(fObj.type === 'pdf') expandPdf(fObj); };
             el('fileList').appendChild(item);
         }
@@ -177,6 +210,7 @@
 
         async function showPreview(id) {
             const fObj = files.find(f => f.id === id);
+            if(!fObj) return;
             document.querySelectorAll('.file-item').forEach(i => i.classList.toggle('active', i.dataset.id == id));
             el('previewContainer').innerHTML = '载入中...';
             
