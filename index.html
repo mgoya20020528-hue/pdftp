@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF工具箱</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <style>
+        :root { 
+            --bg-gradient: linear-gradient(135deg, #eef2f3 0%, #ffeef0 100%);
+            --glass: rgba(255, 255, 255, 0.8);
+            --primary: #3498db; 
+            --accent: #ff7675; 
+            --border: rgba(255,255,255,0.5);
+        }
+
+        * { margin:0; padding:0; box-sizing:border-box; font-family: 'Segoe UI', sans-serif; }
+        body { background: var(--bg-gradient); height: 100vh; display: flex; align-items: center; justify-content: center; padding: 15px; overflow: hidden; }
+        
+        .container { width: 100%; max-width: 1500px; height: 95vh; background: var(--glass); backdrop-filter: blur(15px); border-radius: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.1); display: flex; overflow: hidden; border: 1px solid var(--border); }
+
+        /* 左侧列表 */
+        .sidebar { width: 320px; border-right: 1px solid rgba(0,0,0,0.05); display: flex; flex-direction: column; background: rgba(255,255,255,0.2); }
+        .sidebar-header { padding: 15px; font-weight: bold; font-size: 0.9rem; border-bottom: 1px solid rgba(0,0,0,0.05); display: flex; justify-content: space-between; }
+        
+        .upload-zone { margin: 15px; padding: 15px; border: 2px dashed var(--primary); border-radius: 12px; text-align: center; cursor: pointer; transition: 0.3s; background: rgba(255,255,255,0.4); }
+        .upload-zone:hover { background: rgba(52, 152, 219, 0.05); }
+
+        #fileList { flex: 1; overflow-y: auto; padding: 10px; }
+        .file-item { display: flex; align-items: center; padding: 10px; margin-bottom: 8px; background: white; border-radius: 10px; font-size: 0.8rem; cursor: grab; border: 1px solid transparent; transition: 0.2s; }
+        .file-item:hover { transform: translateX(5px); border-color: var(--primary); }
+        .file-item.active { border-color: var(--primary); background: #f0f9ff; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+        .file-item.child { margin-left: 20px; background: #fafafa; border-style: dashed; }
+        .file-info { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 8px; }
+        .viewer-main { flex: 1; display: flex; flex-direction: column; background: #f8f9fa; }
+        .preview-box { flex: 1; overflow: auto; display: flex; align-items: center; justify-content: center; padding: 30px; position: relative; }
+        canvas, img { max-width: 100%; max-height: 100%; object-fit: contain; background: white; box-shadow: 0 5px 25px rgba(0,0,0,0.1); }
+        .bottom-console { padding: 15px 25px; background: white; border-top: 1px solid rgba(0,0,0,0.05); box-shadow: 0 -5px 20px rgba(0,0,0,0.02); }
+        .control-row { display: flex; align-items: center; gap: 15px; flex-wrap: wrap; margin-bottom: 12px; }
+        
+        .btn-group { display: flex; gap: 10px; align-items: center; }
+        .btn { border: none; padding: 10px 18px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.85rem; transition: 0.2s; display: flex; align-items: center; gap: 6px; }
+        .btn-p { background: var(--primary); color: white; }
+        .btn-p:hover { background: #2980b9; transform: translateY(-1px); }
+        .btn-outline { background: #f1f3f5; border: 1px solid #dee2e6; color: #495057; }
+        .btn-outline:hover { background: #e9ecef; }
+        .btn-red { background: var(--accent); color: white; margin-left: auto; }
+
+        select, input[type="text"] { padding: 8px 12px; border-radius: 8px; border: 1px solid #ddd; outline: none; font-size: 0.85rem; background: white; }
+        
+        .page-nav { display: flex; align-items: center; gap: 10px; background: #f1f3f5; padding: 5px 12px; border-radius: 8px; font-weight: bold; font-size: 0.85rem; }
+        
+        .progress-bar { height: 4px; background: #eee; width: 100%; border-radius: 2px; overflow: hidden; margin-top: 5px; display: none; }
+        .progress-fill { height: 100%; background: var(--primary); width: 0%; transition: 0.3s; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="sidebar">
+            <div class="sidebar-header">文件队列 <small style="font-weight: normal; color: #888;">双击PDF展开</small></div>
+            <div class="upload-zone" onclick="el('fileInput').click()">
+                <div style="font-size: 1.2rem; margin-bottom: 5px;">☁️</div>
+                <p style="font-size: 0.75rem; font-weight: 600; color: var(--primary);">点击或拖拽上传</p>
+                <input type="file" id="fileInput" accept=".pdf,image/*" multiple style="display:none">
+                <input type="file" id="replaceInput" style="display:none">
+            </div>
+            <div id="fileList"></div>
+        </div>
+
+        <div class="viewer-main">
+            <div class="preview-box" id="previewContainer">
+                <p style="color: #adb5bd;">请载入文件以预览内容</p>
+            </div>
+
+            <div class="bottom-console">
+                <div class="control-row">
+                    <div class="page-nav" id="navGroup" style="display:none;">
+                        <button class="mini-btn" style="border:none;background:none;cursor:pointer;" onclick="changePage(-1)">◀</button>
+                        <span id="pageInfo">1 / 1</span>
+                        <button class="mini-btn" style="border:none;background:none;cursor:pointer;" onclick="changePage(1)">▶</button>
+                    </div>
+                    
+                    <input type="text" id="fileName" value="修改文件名" placeholder="文件名">
+                    
+                    <select id="pageSize">
+                        <option value="original">原始尺寸</option>
+                        <option value="A4">强制 A4 纸张</option>
+                    </select>
+
+                    <select id="fillMode">
+                        <option value="stretch">强制填充 (拉伸)</option>
+                        <option value="contain">保持比例 (留白)</option>
+                    </select>
+                    
+                    <p id="status" style="font-size:0.75rem; color:#666;"></p>
+                </div>
+
+                <div class="control-row" style="margin-bottom: 0;">
+                    <div class="btn-group">
+                        <button class="btn btn-p" onclick="mergePDFs()">✨ 合并导出 PDF</button>
+                        <button class="btn btn-outline" onclick="convertPDFtoImg(false)">🖼️ 导出当页图</button>
+                        <button class="btn btn-outline" onclick="convertPDFtoImg(true)">📦 全部转图 (ZIP)</button>
+                    </div>
+                    <button class="btn btn-red" onclick="location.reload()">🔄 重置清空</button>
+                </div>
+                
+                <div class="progress-bar" id="prog"><div class="progress-fill" id="progFill"></div></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+        let files = [], curPdf = null, curPage = 1, currentReplaceTargetId = null;
+        const el = id => document.getElementById(id);
+
+        new Sortable(el('fileList'), { 
+            animation: 150, 
+            onEnd: () => {
+                const ids = Array.from(el('fileList').children).map(i => i.dataset.id);
+                files = ids.map(id => files.find(f => f.id == id));
+            }
+        });
+
+        el('fileInput').onchange = e => handleFiles(e.target.files);
+
+        async function handleFiles(uploadedFiles) {
+            for (const f of Array.from(uploadedFiles)) {
+                const id = 'f_' + Math.random().toString(36).substr(2, 9);
+                const type = f.type.includes('pdf') ? 'pdf' : 'image';
+                const fileObj = { id, file: f, name: f.name, type };
+                files.push(fileObj);
+                renderFileItem(fileObj);
+            }
+            el('status').innerText = `已添加 ${files.length} 个文件`;
+        }
+
+        function renderFileItem(fObj, isChild = false) {
+            const item = document.createElement('div');
+            item.className = `file-item ${isChild ? 'child' : ''}`;
+            item.dataset.id = fObj.id;
+            const icon = fObj.type.includes('image') ? '🖼️' : '📄';
+            item.innerHTML = `
+                <span>${icon}</span>
+                <div class="file-info"><b>${fObj.name}</b></div>
+                <div style="color:#ff7675; cursor:pointer;" onclick="removeFile('${fObj.id}')">✕</div>
+            `;
+            item.onclick = (e) => { if(e.target.innerText !== '✕') showPreview(fObj.id); };
+            item.ondblclick = () => { if(fObj.type === 'pdf') expandPdf(fObj); };
+            el('fileList').appendChild(item);
+        }
+
+        async function expandPdf(parentObj) {
+            if (parentObj.expanded) return;
+            el('status').innerText = "拆解中...";
+            const data = await parentObj.file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({data}).promise;
+            const pIdx = files.indexOf(parentObj);
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const childObj = { id: `c_${parentObj.id}_${i}`, name: `P${i} - ${parentObj.name}`, type: 'pdf-page', pageNumber: i, file: parentObj.file };
+                files.splice(pIdx + i, 0, childObj);
+                renderFileItem(childObj, true);
+            }
+            parentObj.expanded = true;
+            el('status').innerText = "PDF已按页拆分";
+        }
+
+        function removeFile(id) {
+            files = files.filter(f => f.id !== id);
+            const dom = el('fileList').querySelector(`[data-id="${id}"]`);
+            if(dom) dom.remove();
+        }
+
+        async function showPreview(id) {
+            const fObj = files.find(f => f.id === id);
+            document.querySelectorAll('.file-item').forEach(i => i.classList.toggle('active', i.dataset.id == id));
+            el('previewContainer').innerHTML = '载入中...';
+            
+            if (fObj.type.includes('pdf')) {
+                const data = await fObj.file.arrayBuffer();
+                curPdf = await pdfjsLib.getDocument({data}).promise;
+                curPage = fObj.pageNumber || 1;
+                renderPdfPage();
+                el('navGroup').style.display = 'flex';
+            } else {
+                const img = document.createElement('img');
+                img.src = URL.createObjectURL(fObj.file);
+                el('previewContainer').innerHTML = '';
+                el('previewContainer').appendChild(img);
+                el('navGroup').style.display = 'none';
+            }
+        }
+
+        async function renderPdfPage() {
+            const page = await curPdf.getPage(curPage);
+            const viewport = page.getViewport({scale: 2.0}); 
+            const canvas = document.createElement('canvas');
+            canvas.height = viewport.height; canvas.width = viewport.width;
+            await page.render({canvasContext: canvas.getContext('2d'), viewport}).promise;
+            el('previewContainer').innerHTML = '';
+            el('previewContainer').appendChild(canvas);
+            el('pageInfo').innerText = `${curPage} / ${curPdf.numPages}`;
+        }
+
+        function changePage(delta) {
+            if (!curPdf) return;
+            const newPage = curPage + delta;
+            if (newPage >= 1 && newPage <= curPdf.numPages) { curPage = newPage; renderPdfPage(); }
+        }
+
+        async function mergePDFs() {
+            if (!files.length) return;
+            el('status').innerText = '正在生成...';
+            const merged = await PDFLib.PDFDocument.create();
+            const pSize = el('pageSize').value;
+            const fMode = el('fillMode').value;
+
+            for (const f of files) {
+                if (f.expanded) continue;
+                const bytes = await f.file.arrayBuffer();
+                if (f.type.includes('pdf')) {
+                    const doc = await PDFLib.PDFDocument.load(bytes);
+                    const indices = f.type === 'pdf-page' ? [f.pageNumber - 1] : doc.getPageIndices();
+                    const pages = await merged.copyPages(doc, indices);
+                    pages.forEach(p => merged.addPage(p));
+                } else {
+                    const img = f.file.type === 'image/png' ? await merged.embedPng(bytes) : await merged.embedJpg(bytes);
+                    const pageW = pSize === 'A4' ? 595.28 : img.width;
+                    const pageH = pSize === 'A4' ? 841.89 : img.height;
+                    const page = merged.addPage([pageW, pageH]);
+                    if (fMode === 'stretch') {
+                        page.drawImage(img, { x: 0, y: 0, width: pageW, height: pageH });
+                    } else {
+                        const ratio = Math.min(pageW / img.width, pageH / img.height);
+                        const drawW = img.width * ratio, drawH = img.height * ratio;
+                        page.drawImage(img, { x: (pageW - drawW)/2, y: (pageH - drawH)/2, width: drawW, height: drawH });
+                    }
+                }
+            }
+            saveAs(new Blob([await merged.save()]), `${el('fileName').value}.pdf`);
+            el('status').innerText = '导出成功';
+        }
+
+        async function convertPDFtoImg(all) {
+            if (!curPdf) return;
+            el('prog').style.display = 'block';
+            const zip = all ? new JSZip() : null;
+            const range = all ? Array.from({length: curPdf.numPages}, (_, i) => i + 1) : [curPage];
+            for (let n of range) {
+                const page = await curPdf.getPage(n);
+                const viewport = page.getViewport({scale: 2});
+                const canvas = document.createElement('canvas');
+                canvas.height = viewport.height; canvas.width = viewport.width;
+                await page.render({canvasContext: canvas.getContext('2d'), viewport}).promise;
+                const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+                if (all) zip.file(`page_${n}.png`, blob);
+                else saveAs(blob, `page_${n}.png`);
+                el('progFill').style.width = `${(n/range.length)*100}%`;
+            }
+            if (all) saveAs(await zip.generateAsync({type:'blob'}), 'images.zip');
+            el('prog').style.display = 'none';
+        }
+    </script>
+</body>
+</html>
